@@ -3,87 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Omegle-Like Video Chat</title>
+  <title>Omegle-like Video Chat</title>
   <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-  <!-- Load the latest version of PeerJS -->
-  <script src="https://cdn.peerjs.com/1.3.1/peerjs.min.js"></script>
+  <script src="https://cdn.peerjs.com/1.0.0/peerjs.min.js"></script>
+  <style>
+    #video-chat { display: none; }
+  </style>
 </head>
 <body>
-  <div class="container mt-5">
-    <h1 class="text-center">Omegle-Like Video Chat</h1>
+  <div class="container">
+    <h2 class="text-center mt-4">Video Chat</h2>
 
-    <!-- Video elements for local and remote streams -->
-    <div class="row mt-4">
-      <div class="col-md-6">
-        <h3>Your Video</h3>
-        <video id="localVideo" autoplay muted playsinline></video>
-      </div>
-      <div class="col-md-6">
-        <h3>Stranger's Video</h3>
-        <video id="remoteVideo" autoplay playsinline></video>
-      </div>
+    <div id="interest-section">
+      <label for="interests">Enter your interests (optional):</label>
+      <input type="text" id="interests" placeholder="e.g., movies, sports" class="form-control">
     </div>
 
-    <!-- Chat controls -->
-    <div class="mt-3 text-center">
-      <button id="startChat" class="btn btn-success">Start Chat</button>
+    <div class="mt-4">
+      <button id="startChat" class="btn btn-primary">Start Chat</button>
       <button id="disconnectChat" class="btn btn-danger" disabled>Disconnect</button>
       <button id="reportUser" class="btn btn-warning" disabled>Report User</button>
     </div>
 
-    <!-- Interests input for filtering -->
-    <div class="form-group mt-3">
-      <label for="interests">Enter Your Interests (comma-separated):</label>
-      <input type="text" id="interests" class="form-control" placeholder="e.g., sports, movies, coding">
+    <div id="video-chat" class="mt-4">
+      <video id="localVideo" autoplay muted playsinline></video>
+      <video id="remoteVideo" autoplay playsinline></video>
     </div>
   </div>
 
-  <!-- Your custom scripts should come after the PeerJS script -->
   <script>
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbyYvrwgqtzJNvkmwtqkDY6-JpVB7L4fPXeb3fMQQvJN8oYwyQ0KnUHXj5H9h24Dyl13/exec';  // Replace with your GAS Web App URL
-    let localStream, peer, call, matchedPeerId, isConnected = false;
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbz0cwuRvKyyzG0YGEXbtG9ly8jTRpOb1brHKYBoJW07q73bGyKV4ESEhUjuQvQ5kLpX/exec';  // Replace with your GAS web app URL
+    let peer, localStream, call, matchedPeerId, isConnected = false;
+    let interests = document.getElementById('interests').value.trim();
 
-    // Access user's video and audio stream
     function getLocalStream() {
       navigator.mediaDevices.getUserMedia({ video: true, audio: true })
         .then(stream => {
           localStream = stream;
           document.getElementById('localVideo').srcObject = stream;
         })
-        .catch(error => console.error('Error accessing media devices:', error));
+        .catch(err => console.error('Error accessing media devices.', err));
     }
 
-    // Initialize PeerJS and connect to the signaling server
+    // Initialize PeerJS and Socket connection
     function initPeerAndSocket() {
-      const interests = document.getElementById('interests').value.split(',').map(i => i.trim());
-      peer = new Peer();  // Create a new PeerJS instance
-
+      peer = new Peer();  // Initialize PeerJS
       peer.on('open', id => {
-        console.log('Peer connection established with ID:', id);
+        console.log('Peer connection established. Your ID:', id);
         fetchMatchedPeer(id, interests);
       });
 
       peer.on('call', incomingCall => {
-        call = incomingCall;
         incomingCall.answer(localStream);
         incomingCall.on('stream', remoteStream => {
           document.getElementById('remoteVideo').srcObject = remoteStream;
-          isConnected = true;
           toggleChat(true);
         });
       });
-
-      peer.on('error', err => console.error('PeerJS error:', err));
     }
 
-    // Fetch matched peer from GAS
+    // Fetch a matched peer from GAS based on interests (optional)
     function fetchMatchedPeer(peerId, interests) {
-      fetch(`${GAS_URL}?action=matchPeer&peerId=${peerId}&interests=${encodeURIComponent(interests)}`)
+      fetch(`${GAS_URL}?action=getMatchedPeer&interests=${interests}`)
         .then(response => response.json())
         .then(data => {
-          if (data.matchedPeerId) {
-            matchedPeerId = data.matchedPeerId;
-            connectToPeer(matchedPeerId);
+          matchedPeerId = data.peerId;
+          if (matchedPeerId) {
+            console.log('Matched with peer:', matchedPeerId);
+            startCall(matchedPeerId);
           } else {
             console.log('No match found. Retrying...');
             setTimeout(() => fetchMatchedPeer(peerId, interests), 5000);  // Retry after 5 seconds
@@ -92,19 +79,12 @@
         .catch(error => console.error('Error matching peer:', error));
     }
 
-    // Connect to the matched peer
-    function connectToPeer(peerId) {
+    // Start a call with the matched peer
+    function startCall(peerId) {
       call = peer.call(peerId, localStream);
       call.on('stream', remoteStream => {
         document.getElementById('remoteVideo').srcObject = remoteStream;
-        isConnected = true;
         toggleChat(true);
-      });
-
-      call.on('close', () => {
-        console.log('Call ended. Reconnecting...');
-        toggleChat(false);
-        fetchMatchedPeer(peer.id, interests);  // Auto-reconnect
       });
     }
 
@@ -112,9 +92,7 @@
     function reportUser() {
       if (matchedPeerId) {
         fetch(`${GAS_URL}?action=reportUser&peerId=${matchedPeerId}`)
-          .then(() => {
-            alert('User reported!');
-          })
+          .then(() => alert('User reported!'))
           .catch(error => console.error('Error reporting user:', error));
       }
     }
@@ -133,13 +111,15 @@
       if (call) call.close();
       isConnected = false;
       toggleChat(false);
-      fetchMatchedPeer(peer.id, interests);  // Auto-reconnect to another peer
+      fetchMatchedPeer(peer.id, interests);  // Auto reconnect to another peer
     });
 
     // Enable/disable chat UI
     function toggleChat(enable) {
       document.getElementById('reportUser').disabled = !enable;
       document.getElementById('disconnectChat').disabled = !enable;
+      document.getElementById('chat-input').disabled = !enable;
+      document.getElementById('sendChat').disabled = !enable;
     }
   </script>
 </body>
